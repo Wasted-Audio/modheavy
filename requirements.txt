@@ -4,3 +4,4 @@ case-converter==1.1.0
 Flask==2.2.3
 Flask-SocketIO==5.3.4
 simple-websocket==0.10.0
+hvcc==0.7
