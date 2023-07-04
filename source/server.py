@@ -22,6 +22,20 @@ socketio = SocketIO(app)
 
 config = configparser.ConfigParser()
 
+
+class Colours:
+    purple = "\033[95m"
+    cyan = "\033[96m"
+    dark_cyan = "\033[36m"
+    blue = "\033[94m"
+    green = "\033[92m"
+    yellow = "\033[93m"
+    red = "\033[91m"
+    bold = "\033[1m"
+    underline = "\033[4m"
+    end = "\033[0m"
+
+
 pluginCategories = [
     "DelayPlugin",
     "DistortionPlugin",
@@ -38,15 +52,15 @@ pluginCategories = [
 ]
 
 deviceList = [
-    # 'modduox',
+    'modduox',
     'moddwarf'
 ]
 
 @app.route("/", methods=["GET"])
 def upload_page():
     return render_template(
-        "index.html", 
-        categoryLength = len(pluginCategories), 
+        "index.html",
+        categoryLength = len(pluginCategories),
         pluginCategories = pluginCategories,
         name = name,
         brand = brand,
@@ -69,24 +83,24 @@ def upload():
         if request.files:
             filenames = []
             uploaded_files = request.files.getlist("files")
-            
+
             # # check if we received exactly 2 files
             # if len(uploaded_files) != 2:
             #     socketio.emit('response', {
             #         'data': '''You must upload exactly 2 files: <strong>gen_exported.cpp</strong> and <strong>gen_exported.h</strong> for Gen or <strong>rnbo_source.cpp</strong> and <strong>description.json</strong> for RNBO'''})
             #     return "ok"
-            
+
             #detect if the files are Gen or RNBO
             for file in uploaded_files:
                 filenames.append(file.filename)
-            
+
             rootDirectory = "/home/modgen/mod-plugin-builder/heavy-plugins/"
             prepareDirectory(rootDirectory)
             #create a new folder to save the files
             directory = f'{rootDirectory}plugins/heavy-plugin/'
             if not os.path.exists(directory):
                 os.makedirs(directory)
-                
+
             for file in uploaded_files:
                 # # check if the file has one of the accepted filenames
                 # if (type == 'gen' and file.filename not in acceptedGenFilenames) or (type == 'rnbo' and file.filename not in acceptedRnboFilenames):
@@ -130,17 +144,17 @@ def upload():
                 metajson.write(meta_object)
 
             socketio.emit('response', {'data': 'Write metadata file', 'type': 'success'})
-            
+
             # export the plugin
             if exportPlugin(directory, name) is False:
                 socketio.emit('response', {'data': 'Failed to export plugin', 'type': 'error'})
                 return "ok"
-            
+
             # build the plugin
             if buildPlugin(device, directory) is False:
                 socketio.emit('response', {'data': 'Failed to build plugin', 'type': 'error'})
                 return "ok"
-            
+
             # compress the plugin
             if compressPlugin(brand, name, directory) is False:
                 socketio.emit('response', {'data': 'Failed to compress plugin', 'type': 'error'})
@@ -149,7 +163,7 @@ def upload():
             if getBase64(directory) is False:
                 socketio.emit('response', {'data': 'Failed to get base64', 'type': 'error'})
                 return "ok"
-            
+
         else:
             socketio.emit('response', {'data': 'No files were selected', 'type': 'error'})
         return "ok"
@@ -198,7 +212,7 @@ def compressPlugin(brand, name, directory):
     try:
         process = subprocess.Popen(
             shlex.split(command),
-            shell=False, 
+            shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=f'{directory}bin'
@@ -248,7 +262,7 @@ def exportPlugin(directory, name):
     socketio.emit('response', {'data': 'Exporting Plugin code'})
 
     try:
-        hvcc.compile_dataflow(
+        results = hvcc.compile_dataflow(
             f'{directory}main.pd',
             f'{directory}',
             name,
@@ -260,7 +274,36 @@ def exportPlugin(directory, name):
     except:
         socketio.emit('response', {'data': f'ERROR {sys.exc_info()[1]} while running hvcc', 'type': 'error'})
         return False
-    
+
+    errorCount = 0
+    for r in list(results.values()):
+        # print any errors
+        if r["notifs"].get("has_error", False):
+            for i, error in enumerate(r["notifs"].get("errors", [])):
+                errorCount += 1
+                socketio.emit('response', {'data': "{4:3d}) {2}Error{3} {0}: {1}".format(
+                    r["stage"], error["message"], Colours.red, Colours.end, i + 1)
+                    })
+
+            # only print exception if no errors are indicated
+            if len(r["notifs"].get("errors", [])) == 0 and r["notifs"].get("exception", None) is not None:
+                errorCount += 1
+                socketio.emit('response', {'data': "{2}Error{3} {0} exception: {1}".format(
+                    r["stage"], r["notifs"]["exception"], Colours.red, Colours.end)
+                })
+
+            # clear any exceptions such that results can be JSONified if necessary
+            r["notifs"]["exception"] = []
+
+        # print any warnings
+        for i, warning in enumerate(r["notifs"].get("warnings", [])):
+            socketio.emit('response', {'data': "{4:3d}) {2}Warning{3} {0}: {1}".format(
+                r["stage"], warning["message"], Colours.yellow, Colours.end, i + 1)
+            })
+
+    if errorCount > 1:
+        return False
+
     socketio.emit('response', {'data': 'Plugin exported successfully', 'type': 'success'})
     return True
 
@@ -271,7 +314,7 @@ def buildPlugin(device, directory):
     try:
         process = subprocess.Popen(
             shlex.split(command),
-            shell=True, 
+            shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=directory,
@@ -280,7 +323,7 @@ def buildPlugin(device, directory):
     except:
         socketio.emit('response', {'data': f'ERROR {sys.exc_info()[1]} while running {command}', 'type': 'error'})
         return False
-    
+
     while True:
         output = process.stdout.readline()
         errors = process.stderr.readline()
